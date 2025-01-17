@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>DevOps Time Tracker</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 0 20px;
+        }
+        .card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            background: white;
+        }
+        .input-group {
+            margin-bottom: 15px;
+        }
+        .input-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        .input-group input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .task {
+            border: 1px solid #eee;
+            border-radius: 4px;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        .error {
+            background: #fee;
+            border: 1px solid #fcc;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            color: #c00;
+        }
+        .loading {
+            color: #666;
+            font-style: italic;
+        }
+        .total {
+            font-weight: bold;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>DevOps Time Tracker</h2>
+        <div class="input-group">
+            <label for="pat">Personal Access Token:</label>
+            <input type="password" id="pat" placeholder="Enter your PAT">
+        </div>
+        <div class="input-group">
+            <label for="org">Organization:</label>
+            <input type="text" id="org" placeholder="e.g., your-organization">
+        </div>
+        <div class="input-group">
+            <label for="project">Project:</label>
+            <input type="text" id="project" placeholder="e.g., your-project">
+        </div>
+        <button onclick="fetchTimeData()">Fetch Time Data</button>
+    </div>
+
+    <div id="error" style="display: none;" class="error"></div>
+    <div id="loading" style="display: none;" class="loading">Loading...</div>
+    <div id="results" class="card" style="display: none;">
+        <h3>Today's Time Log</h3>
+        <div id="timeData"></div>
+        <div id="total" class="total"></div>
+    </div>
+
+    <script>
+        // Load saved settings
+        document.getElementById('pat').value = localStorage.getItem('devops_pat') || '';
+        document.getElementById('org').value = localStorage.getItem('devops_org') || '';
+        document.getElementById('project').value = localStorage.getItem('devops_project') || '';
+
+        async function fetchTimeData() {
+            const pat = document.getElementById('pat').value;
+            const org = document.getElementById('org').value;
+            const project = document.getElementById('project').value;
+
+            // Save settings
+            localStorage.setItem('devops_pat', pat);
+            localStorage.setItem('devops_org', org);
+            localStorage.setItem('devops_project', project);
+
+            // Show loading, hide other states
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('error').style.display = 'none';
+            document.getElementById('results').style.display = 'none';
+
+            try {
+                const today = new Date().toISOString().split('T')[0];
+                const url = `https://dev.azure.com/${org}/${project}/_apis/work/updates?api-version=6.0&fromDate=${today}`;
+
+                const response = await fetch(url, {
+                    headers: {
+                        'Authorization': `Basic ${btoa(':' + pat)}`,
+                        'Content-Type': 'application/json',
+                    }
+                });
+
+                if (!response.ok) throw new Error('Failed to fetch data. Please check your credentials.');
+
+                const data = await response.json();
+                const timeByTask = {};
+
+                data.value.forEach(update => {
+                    if (!update.fields) return;
+                    
+                    const fields = update.fields;
+                    if (fields['Microsoft.VSTS.Scheduling.CompletedWork']) {
+                        const taskId = update.workItem.id;
+                        const newValue = fields['Microsoft.VSTS.Scheduling.CompletedWork'].newValue || 0;
+                        const oldValue = fields['Microsoft.VSTS.Scheduling.CompletedWork'].oldValue || 0;
+                        const timeSpent = newValue - oldValue;
+                        
+                        if (!timeByTask[taskId]) {
+                            timeByTask[taskId] = {
+                                id: taskId,
+                                title: update.workItem.fields['System.Title'],
+                                timeSpent: 0
+                            };
+                        }
+                        
+                        timeByTask[taskId].timeSpent += timeSpent;
+                    }
+                });
+
+                const timeData = Object.values(timeByTask);
+                displayResults(timeData);
+            } catch (err) {
+                document.getElementById('error').textContent = err.message;
+                document.getElementById('error').style.display = 'block';
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        function displayResults(timeData) {
+            const resultsDiv = document.getElementById('results');
+            const timeDataDiv = document.getElementById('timeData');
+            const totalDiv = document.getElementById('total');
+
+            timeDataDiv.innerHTML = '';
+            
+            if (timeData.length === 0) {
+                timeDataDiv.innerHTML = '<p>No time logged today</p>';
+            } else {
+                timeData.forEach(task => {
+                    const taskDiv = document.createElement('div');
+                    taskDiv.className = 'task';
+                    taskDiv.innerHTML = `
+                        <h4>${task.title}</h4>
+                        <p>Hours: ${task.timeSpent}</p>
+                    `;
+                    timeDataDiv.appendChild(taskDiv);
+                });
+
+                const totalHours = timeData.reduce((sum, task) => sum + task.timeSpent, 0);
+                totalDiv.textContent = `Total Hours: ${totalHours}`;
+            }
+
+            resultsDiv.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
