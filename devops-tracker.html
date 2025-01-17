@@ -106,7 +106,7 @@
 
             try {
                 const today = new Date().toISOString().split('T')[0];
-                const url = `https://dev.azure.com/${org}/${project}/_apis/work/updates?api-version=6.0&fromDate=${today}`;
+                const url = `https://dev.azure.com/${org}/${encodeURIComponent(project)}/_apis/work/updates?api-version=6.0&fromDate=${today}`;
 
                 const response = await fetch(url, {
                     headers: {
