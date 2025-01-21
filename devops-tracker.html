@@ -70,7 +70,7 @@
         </div>
         <div class="input-group">
             <label for="project">Project:</label>
-            <input type="text" id="project" placeholder="e.g., your-project">
+            <input type="text" id="project" placeholder="e.g., ICAM ZTA">
         </div>
         <button onclick="fetchTimeData()">Fetch Time Data</button>
     </div>
@@ -106,7 +106,7 @@
 
             try {
                 const today = new Date().toISOString().split('T')[0];
-                const url = `https://dev.azure.com/${org}/${encodeURIComponent(project)}/_apis/work/updates?api-version=6.0&fromDate=${today}`;
+                const url = `https://${org}.visualstudio.com/${encodeURIComponent(project)}/_apis/wit/reporting/workitemrevisions?api-version=6.0&fields=System.Id,System.Title,Microsoft.VSTS.Scheduling.CompletedWork&from=${today}`;
 
                 const response = await fetch(url, {
                     headers: {
@@ -118,32 +118,31 @@
                 if (!response.ok) throw new Error('Failed to fetch data. Please check your credentials.');
 
                 const data = await response.json();
-                const timeByTask = {};
-
-                data.value.forEach(update => {
-                    if (!update.fields) return;
+                
+                // Process the revisions to find changes in completed work
+                const workItems = {};
+                
+                data.values.forEach(item => {
+                    const id = item['System.Id'];
+                    const title = item['System.Title'];
+                    const completedWork = item['Microsoft.VSTS.Scheduling.CompletedWork'] || 0;
                     
-                    const fields = update.fields;
-                    if (fields['Microsoft.VSTS.Scheduling.CompletedWork']) {
-                        const taskId = update.workItem.id;
-                        const newValue = fields['Microsoft.VSTS.Scheduling.CompletedWork'].newValue || 0;
-                        const oldValue = fields['Microsoft.VSTS.Scheduling.CompletedWork'].oldValue || 0;
-                        const timeSpent = newValue - oldValue;
-                        
-                        if (!timeByTask[taskId]) {
-                            timeByTask[taskId] = {
-                                id: taskId,
-                                title: update.workItem.fields['System.Title'],
-                                timeSpent: 0
-                            };
-                        }
-                        
-                        timeByTask[taskId].timeSpent += timeSpent;
+                    if (!workItems[id]) {
+                        workItems[id] = {
+                            id,
+                            title,
+                            previousValue: 0,
+                            currentValue: completedWork,
+                            hoursToday: 0
+                        };
+                    } else {
+                        // Update previous value if this revision is older
+                        workItems[id].previousValue = completedWork;
+                        workItems[id].hoursToday = workItems[id].currentValue - workItems[id].previousValue;
                     }
                 });
 
-                const timeData = Object.values(timeByTask);
-                displayResults(timeData);
+                displayResults(Object.values(workItems));
             } catch (err) {
                 document.getElementById('error').textContent = err.message;
                 document.getElementById('error').style.display = 'block';
@@ -163,17 +162,20 @@
                 timeDataDiv.innerHTML = '<p>No time logged today</p>';
             } else {
                 timeData.forEach(task => {
-                    const taskDiv = document.createElement('div');
-                    taskDiv.className = 'task';
-                    taskDiv.innerHTML = `
-                        <h4>${task.title}</h4>
-                        <p>Hours: ${task.timeSpent}</p>
-                    `;
-                    timeDataDiv.appendChild(taskDiv);
+                    if (task.hoursToday > 0) {  // Only show items with hours logged today
+                        const taskDiv = document.createElement('div');
+                        taskDiv.className = 'task';
+                        taskDiv.innerHTML = `
+                            <h4>${task.title}</h4>
+                            <p>Hours Today: ${task.hoursToday}</p>
+                            <p>Previous Total: ${task.previousValue} → Current Total: ${task.currentValue}</p>
+                        `;
+                        timeDataDiv.appendChild(taskDiv);
+                    }
                 });
 
-                const totalHours = timeData.reduce((sum, task) => sum + task.timeSpent, 0);
-                totalDiv.textContent = `Total Hours: ${totalHours}`;
+                const totalHours = timeData.reduce((sum, task) => sum + task.hoursToday, 0);
+                totalDiv.textContent = `Total Hours Today: ${totalHours}`;
             }
 
             resultsDiv.style.display = 'block';
